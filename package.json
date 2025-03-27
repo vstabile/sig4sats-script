@@ -19,7 +19,8 @@
     "typescript": "^5.8.2"
   },
   "dependencies": {
-    "@cashu/cashu-ts": "^2.4.1",
+    "@cashu/cashu-ts": "file:../cashu-ts",
+    "@cashu/crypto": "^0.3.4",
     "@noble/curves": "^1.8.1",
     "@noble/hashes": "^1.7.1",
     "nostr-tools": "^2.11.0"

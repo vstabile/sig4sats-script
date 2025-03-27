@@ -5,3 +5,7 @@ export function negateScalar(scalar: Uint8Array): Uint8Array {
   const negated = (secp.CURVE.n - s) % secp.CURVE.n;
   return Buffer.from(negated.toString(16).padStart(64, "0"), "hex");
 }
+
+export function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
