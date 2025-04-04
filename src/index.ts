@@ -18,6 +18,7 @@ import {
   Proof,
 } from "@cashu/cashu-ts";
 import { hashToCurve } from "@cashu/crypto/modules/common";
+import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
 
 async function main() {
   // ----------------------------------------
@@ -93,11 +94,7 @@ async function main() {
   const R_s_x = secretSignature.subarray(0, 32);
 
   // Signer shares the public nonce with the Payer
-  console.log(
-    "Signer's Public Nonce (shared):",
-    Buffer.from(R_s_x).toString("hex"),
-    "\n"
-  );
+  console.log("Signer's Public Nonce (shared):", bytesToHex(R_s_x), "\n");
 
   // ----------------------------------------
   // Step 3: Payer creates an adaptor signature for claiming his Cashu payment
@@ -107,31 +104,27 @@ async function main() {
   // c_nostr = H(R_s || P_s || m)
   const c_nostr = schnorr.utils.taggedHash(
     "BIP0340/challenge",
-    Buffer.concat([
-      R_s_x,
-      Buffer.from(P_s, "hex"),
-      Buffer.from(nostrEventId, "hex"),
-    ])
+    new Uint8Array([...R_s_x, ...hexToBytes(P_s), ...hexToBytes(nostrEventId)])
   );
 
   // Then computes the Signer's public nonce point on the curve
-  const R_s = schnorr.utils.lift_x(
-    BigInt("0x" + Buffer.from(R_s_x).toString("hex"))
-  );
+  const R_s = schnorr.utils.lift_x(BigInt("0x" + bytesToHex(R_s_x)));
 
   // And computes the adaptor point T as a commitment to the Nostr signature:
   // T = R_s + c_nostr * P_s
   let T = R_s.add(
     schnorr.utils
       .lift_x(BigInt("0x" + P_s))
-      .multiply(BigInt("0x" + Buffer.from(c_nostr).toString("hex")))
+      .multiply(BigInt("0x" + bytesToHex(c_nostr)))
   );
 
   console.log("Adaptor Point (T):", T.toHex(), "\n");
 
   // Payer generates an adaptor signature for each proof using a unique nonce
-  let adaptors: Record<string, { s_a: bigint; R_p_x: Buffer; R_a_x: Buffer }> =
-    {};
+  let adaptors: Record<
+    string,
+    { s_a: bigint; R_p_x: Uint8Array; R_a_x: Uint8Array }
+  > = {};
   for (const [i, proof] of proofs.entries()) {
     // First he generates a nonce (r_p) and the adaptor public nonce (R_p + T)
     // ensuring that both R_p and R_a = (R_p + T) have even y-coordinates (BIP340)
@@ -151,20 +144,20 @@ async function main() {
     } while ((R_a.y & 1n) === 1n);
 
     // Adaptor nonce X-coordinate
-    const R_a_x = Buffer.from(R_a.x.toString(16).padStart(64, "0"), "hex");
+    const R_a_x = hexToBytes(R_a.x.toString(16).padStart(64, "0"));
     // Payer's nonce X-coordinate
-    const R_p_x = Buffer.from(R_p.x.toString(16).padStart(64, "0"), "hex");
+    const R_p_x = hexToBytes(R_p.x.toString(16).padStart(64, "0"));
 
     // Then calculates the Cashu P2PK challenge: H(R + T || P_p || m)
     const c_cashu = schnorr.utils.taggedHash(
       "BIP0340/challenge",
-      Buffer.concat([R_a_x, Buffer.from(P_p, "hex"), sha256(proof.secret)])
+      new Uint8Array([...R_a_x, ...hexToBytes(P_p), ...sha256(proof.secret)])
     );
 
     // Scalars conversion to BigInt for arithmetic operations
-    const r = BigInt(`0x${Buffer.from(r_p).toString("hex")}`) % secp.CURVE.n;
-    let c = BigInt(`0x${Buffer.from(c_cashu).toString("hex")}`) % secp.CURVE.n;
-    const k = BigInt(`0x${Buffer.from(k_p).toString("hex")}`) % secp.CURVE.n;
+    const r = BigInt(`0x${bytesToHex(r_p)}`) % secp.CURVE.n;
+    let c = BigInt(`0x${bytesToHex(c_cashu)}`) % secp.CURVE.n;
+    const k = BigInt(`0x${bytesToHex(k_p)}`) % secp.CURVE.n;
 
     // The challenge must be negated if Payer's private key is associated with
     // a point on the curve with an odd y-coordinate (BIP340)
@@ -183,12 +176,8 @@ async function main() {
     // Payer shares the adaptors with the Signer
     console.log("Proof", Y);
     console.log("Adaptor Scalar (s_a):", s_a.toString(16));
-    console.log("Signer Nonce (R_p):", Buffer.from(R_p_x).toString("hex"));
-    console.log(
-      "Adaptor Nonce (R_a):",
-      Buffer.from(R_a_x).toString("hex"),
-      "\n"
-    );
+    console.log("Signer Nonce (R_p):", bytesToHex(R_p_x));
+    console.log("Adaptor Nonce (R_a):", bytesToHex(R_a_x), "\n");
   }
 
   // Payer shares the locked Cashu token with the Signer
@@ -228,16 +217,16 @@ async function main() {
 
     const c_cashu = schnorr.utils.taggedHash(
       "BIP0340/challenge",
-      Buffer.concat([
-        adaptors[Y].R_a_x,
-        Buffer.from(P_p, "hex"),
-        sha256(proof.secret),
+      new Uint8Array([
+        ...adaptors[Y].R_a_x,
+        ...hexToBytes(P_p),
+        ...sha256(proof.secret),
       ])
     );
 
     cashuChallenges = {
       ...cashuChallenges,
-      [Y]: BigInt(`0x${Buffer.from(c_cashu).toString("hex")}`),
+      [Y]: BigInt(`0x${bytesToHex(c_cashu)}`),
     };
   }
 
@@ -245,9 +234,7 @@ async function main() {
   // s_a * G ?= R_p + H(R_p + T || P_p || m) * P_p
   let areAdaptorsValid = true;
   for (const [Y, { s_a, R_p_x }] of Object.entries(adaptors)) {
-    const R_p = schnorr.utils.lift_x(
-      BigInt("0x" + Buffer.from(R_p_x).toString("hex"))
-    );
+    const R_p = schnorr.utils.lift_x(BigInt("0x" + bytesToHex(R_p_x)));
 
     const left = secp.ProjectivePoint.BASE.multiply(s_a);
     const rightEven = R_p.add(
@@ -275,9 +262,7 @@ async function main() {
 
   // Then the Signer completes the signatures by adding the hidden value (t)
   // which is his Nostr signature over the Nostr event ID
-  const t = BigInt(
-    `0x${Buffer.from(secretSignature.subarray(32)).toString("hex")}`
-  );
+  const t = BigInt(`0x${bytesToHex(secretSignature.subarray(32))}`);
 
   let cashuSignatures: string[] = [];
   for (const [Y, { s_a, R_a_x }] of Object.entries(adaptors)) {
@@ -285,10 +270,12 @@ async function main() {
     const s_c = (s_a + t) % secp.CURVE.n;
 
     // The Cashu signature is the adaptor nonce (R_a) and the Cashu scalar (s_c)
-    const cashuSignature = Buffer.concat([
-      R_a_x,
-      Buffer.from(s_c.toString(16).padStart(64, "0"), "hex"),
-    ]).toString("hex");
+    const cashuSignature = bytesToHex(
+      new Uint8Array([
+        ...R_a_x,
+        ...hexToBytes(s_c.toString(16).padStart(64, "0")),
+      ])
+    );
 
     cashuSignatures.push(cashuSignature);
 
@@ -357,10 +344,12 @@ async function main() {
   );
 
   // And can now publish the signed Nostr event to the network
-  const nostrSignature = Buffer.concat([
-    R_s_x, // Signer's public nonce shared in Step 2
-    Buffer.from(extractedSecret.toString(16).padStart(64, "0"), "hex"),
-  ]).toString("hex");
+  const nostrSignature = bytesToHex(
+    new Uint8Array([
+      ...R_s_x, // Signer's public nonce shared in Step 2
+      ...hexToBytes(extractedSecret.toString(16).padStart(64, "0")),
+    ])
+  );
 
   const signedEvent = {
     id: nostrEventId,
